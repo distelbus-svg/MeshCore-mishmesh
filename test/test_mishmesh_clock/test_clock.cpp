@@ -581,6 +581,78 @@ TEST_F(ClockAppletFixture, SelectTogglesStopwatchService) {
   EXPECT_EQ(0u, clockService().swElapsedMs(0));
 }
 
+// The Pause/Stop toggles must bank against the *moment the button is pressed*
+// (the live monotonic clock), not the applet's last-render timestamp `_now`,
+// which can be minutes stale when the Clock app was backgrounded or asleep. Old
+// behaviour: a stop pressed while the clock app is not the foreground app banked
+// against the stale frame, so the frozen value was rebased onto the wrong
+// instant and "resuming" continued from there. These tests drive a press-time
+// clock that races ahead of the render clock and pin the freeze to be exact.
+namespace {
+uint32_t g_live = 0;
+}
+TEST_F(ClockAppletFixture, StopwatchStopBanksLivePressTimeNotStaleRender) {
+  g_live = 0;
+  ClockApplet::setInputClockForTest([]() { return g_live; });
+
+  app.onInput(InputEvent::Select);          // start at press-time 0
+  EXPECT_TRUE(clockService().swRunning());
+  EXPECT_EQ(0u, clockService().swElapsedMs(0));
+
+  g_live = 61000;                           // 61s pass with no renders (backgrounded)
+  app.onInput(InputEvent::Select);          // stop - must bank live 61s
+  EXPECT_FALSE(clockService().swRunning());
+  EXPECT_EQ(61000u, clockService().swElapsedMs(0));
+  EXPECT_EQ(61000u, clockService().swElapsedMs(9999));   // frozen, any query time
+
+  render();                                 // a later frame (now=1000) must not move it
+  EXPECT_EQ(61000u, clockService().swElapsedMs(1000));
+
+  g_live = 93000;
+  app.onInput(InputEvent::Select);          // resume - continues from 61s
+  EXPECT_TRUE(clockService().swRunning());
+  EXPECT_EQ(61000u, clockService().swElapsedMs(93000));
+  EXPECT_EQ(63000u, clockService().swElapsedMs(95000));
+
+  ClockApplet::setInputClockForTest(nullptr);
+}
+
+TEST_F(ClockAppletFixture, TimerPauseBanksLivePressTimeNotStaleRender) {
+  g_live = 0;
+  ClockApplet::setInputClockForTest([]() { return g_live; });
+
+  app.onInput(InputEvent::NavRight);        // Timer tab
+  app.onInput(InputEvent::Select);          // start the default 5:00 at press-time 0
+  EXPECT_TRUE(clockService().tmRunning());
+
+  g_live = 60000;                           // 1 min later, no renders
+  app.onInput(InputEvent::Select);          // pause - must bank the live 1 min
+  EXPECT_FALSE(clockService().tmRunning());
+  EXPECT_EQ(4u * 60u * 1000u, clockService().tmRemainingMs(0));
+  EXPECT_EQ(4u * 60u * 1000u, clockService().tmRemainingMs(99999));   // frozen
+
+  ClockApplet::setInputClockForTest(nullptr);
+}
+
+TEST_F(ClockAppletFixture, PomodoroPauseBanksLivePressTimeNotStaleRender) {
+  g_live = 0;
+  ClockApplet::setInputClockForTest([]() { return g_live; });
+
+  app.onInput(InputEvent::NavRight);
+  app.onInput(InputEvent::NavRight);        // Pomodoro tab
+  app.onInput(InputEvent::Select);          // start the 25 min focus at press-time 0
+  EXPECT_TRUE(clockService().pmRunning());
+
+  g_live = 5u * 60u * 1000u;                // 5 min later, no renders
+  app.onInput(InputEvent::Select);          // pause - must bank the live 5 min
+  EXPECT_FALSE(clockService().pmRunning());
+  EXPECT_EQ(20u * 60u * 1000u, clockService().pmRemainingMs(0));
+  render();                                 // a later frame must not move it
+  EXPECT_EQ(20u * 60u * 1000u, clockService().pmRemainingMs(1000));
+
+  ClockApplet::setInputClockForTest(nullptr);
+}
+
 TEST_F(ClockAppletFixture, TimerEditorSetsExactDuration) {
   app.onInput(InputEvent::NavRight);     // Timer tab
   app.onInput(InputEvent::NavUp);        // open the H:MM:SS editor

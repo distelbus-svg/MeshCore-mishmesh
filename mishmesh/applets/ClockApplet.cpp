@@ -8,10 +8,36 @@
 #include <mishmesh/core/WorldClock.h>
 #include <mishmesh/widgets/Modal.h>
 #include <mishmesh/text/Fonts.h>
+#if defined(ARDUINO)
+#include <Arduino.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 
 namespace mishmesh {
+
+namespace {
+// Host test override for the press-time clock (setInputClockForTest).
+uint32_t (*g_inputClockFn)() = nullptr;
+}
+
+void ClockApplet::setInputClockForTest(uint32_t (*fn)()) { g_inputClockFn = fn; }
+
+// The stopwatch/timer/pomodoro bank their start/pause/resume against this stamp.
+// It must be the *moment the button is pressed*, not the applet's last render
+// time: on the device that is millis(), so when the Clock app was backgrounded
+// or the display asleep since the last frame (minutes, not milliseconds),
+// pausing the stopwatch freezes it exactly where it is instead of rebasing it
+// against a stale frame time. Host tests inject their own clock so they can
+// prove the freeze is exact across a long render gap.
+uint32_t ClockApplet::inputNow() const {
+  if (g_inputClockFn) return g_inputClockFn();
+#if defined(ARDUINO)
+  return millis();
+#else
+  return _now;   // host: the frame time the test drove
+#endif
+}
 
 static const int BAR_H = 13;
 
@@ -562,15 +588,15 @@ bool ClockApplet::onInput(InputEvent ev) {
 
 bool ClockApplet::inputStopwatch(InputEvent ev) {
   ClockService& svc = clockService();
-  if (ev == InputEvent::Select) { svc.swToggle(_now); return true; }
+  if (ev == InputEvent::Select) { svc.swToggle(inputNow()); return true; }
   if (ev == InputEvent::SelectLong) { svc.swReset(); return true; }
-  if (ev == InputEvent::NavUp && svc.swRunning()) { svc.swLap(_now); return true; }
+  if (ev == InputEvent::NavUp && svc.swRunning()) { svc.swLap(inputNow()); return true; }
   return false;
 }
 
 bool ClockApplet::inputTimer(InputEvent ev) {
   ClockService& svc = clockService();
-  if (ev == InputEvent::Select) { svc.tmToggle(_now); return true; }
+  if (ev == InputEvent::Select) { svc.tmToggle(inputNow()); return true; }
   if (ev == InputEvent::SelectLong) { svc.tmReset(); return true; }
   if ((ev == InputEvent::NavUp || ev == InputEvent::NavDown) && !svc.tmRunning() && !svc.tmPaused()) {
     openTimerEditor();
@@ -667,11 +693,11 @@ bool ClockApplet::inputPomodoro(InputEvent ev) {
 
   // Idle: start, or open setup.
   if (!s.pmActive()) {
-    if (ev == InputEvent::Select) { s.pmStart(_now); return true; }
+    if (ev == InputEvent::Select) { s.pmStart(inputNow()); return true; }
     if (ev == InputEvent::SelectLong) { openPomodoroSetup(); return true; }
     return false;
   }
-  if (ev == InputEvent::Select) { s.pmToggle(_now); return true; }
+  if (ev == InputEvent::Select) { s.pmToggle(inputNow()); return true; }
   if (ev == InputEvent::SelectLong) { s.pmReset(); return true; }
   return false;
 }

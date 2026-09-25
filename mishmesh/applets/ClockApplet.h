@@ -42,6 +42,9 @@ public:
   bool editingTimerForTest() const { return _editor.open && _editor.forTimer; }
   bool pickingCityForTest() const { return _pickingCity; }
   bool pomodoroSetupOpenForTest() const { return _pomoSetupOpen; }
+  // Host tests override the press-time clock (the lock that makes Pause/Stop
+  // freeze the engine): give tests a clock that can diverge from the render time.
+  static void setInputClockForTest(uint32_t (*fn)());
 
 private:
   enum Tab : int { TAB_STOPWATCH, TAB_TIMER, TAB_POMODORO, TAB_ALARM, TAB_WORLD, TAB_SETTINGS };
@@ -64,6 +67,7 @@ private:
   bool inputAlarm(InputEvent ev);
   bool inputWorld(InputEvent ev);
   bool inputPomodoro(InputEvent ev);
+  uint32_t inputNow() const;   // live press-time clock for the stopwatch/timer/pomodoro toggles
 
   AppletHost*  _host = nullptr;
   AppServices* _app = nullptr;
