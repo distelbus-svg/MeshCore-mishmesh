@@ -78,7 +78,7 @@ AboutApplet& aboutApplet() {
   return a;
 }
 
-MISHMESH_REGISTER_APPLET_ICON(&aboutApplet(), Placement::AppMenu, "About", 10,
+MISHMESH_REGISTER_APPLET_ICON(&aboutApplet(), Placement::AppMenu, "About", 11,
                               (uint16_t)Icon::Coffee);   // coffee cup = support
 
 }  // namespace mishmesh

@@ -30,5 +30,5 @@ typedef enum {
   WrongSignature
 } SavedState;
 
-constexpr uint8_t gameoverstr[] = "VOUS AVEZ PERDU!";
+constexpr uint8_t gameoverstr[] = "GAME OVER";
 // vim:ft=cpp

@@ -103,6 +103,6 @@ bool SettingsApplet::onInput(InputEvent ev) {
 
 static SettingsApplet s_settings;
 MISHMESH_REGISTER_APPLET_ICON(&s_settings, ::mishmesh::Placement::AppMenu,
-                              "Settings", 9, (uint16_t)::mishmesh::Icon::Settings);
+                              "Settings", 10, (uint16_t)::mishmesh::Icon::Settings);
 
 }  // namespace mishmesh

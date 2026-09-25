@@ -59,6 +59,7 @@ enum class Icon : uint16_t {
   Sliders     = 0xE027,   // experimental settings group
   Tomato      = 0xE028,   // pomodoro tab + focus-phase mark
   Lock        = 0xE029,   // screen lock engaged (sleep-face status strip)
+  Snake       = 0xE02A,   // snake game applet
 };
 
 }  // namespace mishmesh
