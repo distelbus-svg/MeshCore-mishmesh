@@ -475,6 +475,18 @@ public:
     LocationProvider* lp = _sensors ? _sensors->getLocationProvider() : nullptr;
     return (lp && gpsEnabled()) ? (int)lp->satellitesCount() : 0;
   }
+  int32_t gpsLatitude() const override {
+    LocationProvider* lp = _sensors ? _sensors->getLocationProvider() : nullptr;
+    return (lp && gpsEnabled()) ? (int32_t)lp->getLatitude() : 0;
+  }
+  int32_t gpsLongitude() const override {
+    LocationProvider* lp = _sensors ? _sensors->getLocationProvider() : nullptr;
+    return (lp && gpsEnabled()) ? (int32_t)lp->getLongitude() : 0;
+  }
+  int32_t gpsAltitude() const override {
+    LocationProvider* lp = _sensors ? _sensors->getLocationProvider() : nullptr;
+    return (lp && gpsEnabled()) ? (int32_t)lp->getAltitude() : 0;
+  }
 
   // mishmesh::ContactsService
   int  countByKind(mishmesh::ContactKind k) const override;

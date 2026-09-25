@@ -126,6 +126,12 @@ struct AppServices {
   // so a stale last fix never shows. Satellites: 0 = none/unknown.
   virtual bool gpsHasFix() const { return false; }
   virtual int  gpsSatellites() const { return 0; }
+  // Fix coordinates, from the LocationProvider. Units match the sensors layer:
+  // lat/lon are signed degrees x1,000,000 (e.g. 52.52437 -> 52524370), altitude
+  // is in millimetres. Only meaningful while gpsHasFix(); report 0 otherwise.
+  virtual int32_t gpsLatitude()  const { return 0; }
+  virtual int32_t gpsLongitude() const { return 0; }
+  virtual int32_t gpsAltitude()  const { return 0; }
   // Screen auto-off timeout, as an index into the mishmesh SCREEN_SLEEP options
   // (mishmesh/core/ScreenSleep.h). Default index 1 = 30s. The adapter persists
   // it to NodePrefs and applies it live to the AppletHost.
