@@ -27,8 +27,22 @@ bool KeypadApplet::isDirty() const {
 const char* KeypadApplet::groupAt(int i) const {
   static const char* const NUM[9] = {"1","2","3","4","5","6","7","8","9"};
   static const char* const SYM[9] = {".,?!",":;\"'","()[]","<>{}","+-*/","=_~","@#&","%$|","^`\\"};
+  // Second symbols page: a *visible* special-characters page. Latin layouts
+  // already multi-tap their umlauts on the letter keys, but those never fit on
+  // the caps, so German users cannot see ä/ö/ü anywhere. Moving to the accented
+  // page (arrows + a 1/2 indicator, like the emoji pages) puts the umlauts one
+  // tap away, first cell, for every layout. Groups stay <= 4 codepoints so the
+  // 32px caps fit. The shift key toggles the page's case (AB = ÄÖÜ..); Shift
+  // reads as Upper here because one-shot capitalizing doesn't apply on the page.
+  static const char* const ACCENT[9] = {"äöü", "ßåø", "æœé", "èêë", "ìíî",
+                                        "ïñó", "òôõ", "ùúû", "ýÿ"};
+  static const char* const ACCENT_UP[9] = {"ÄÖÜ", "SSÅØ", "ÆŒÉ", "ÈÊË", "ÌÍÎ",
+                                           "ÏÑÓ", "ÒÔÕ", "ÙÚÛ", "ÝŸ"};
   if (i < 0 || i > 8) return "";
-  if (_symPage) return SYM[i];
+  if (_symPage) {
+    if (!_symAlt) return SYM[i];
+    return (_mode == Mode::Upper || _mode == Mode::Shift) ? ACCENT_UP[i] : ACCENT[i];
+  }
   if (_mode == Mode::Num) return NUM[i];
   const KbdLayout& L = kbdLayoutAt(_langIdx);
   if (_mode == Mode::Upper || _mode == Mode::Shift) return L.upper[i];  // Shift shows caps for the one-shot
@@ -93,8 +107,12 @@ const char* KeypadApplet::cellLabel(int r, int c) const {
   // r == 3
   if (c == 0) {
     // Label shows the NEXT state the button cycles to (see cycleBottomLeft):
-    // letters -> sym -> emoji (when a catalog is registered) -> letters.
-    if (_symPage) return emojiCatalogCount() > 0 ? "emo" : "abc";
+    // letters -> sym -> emoji (when a catalog is registered) or umlauts
+    // otherwise (the "sym twice" slot) -> letters.
+    if (_symPage) {
+      if (_symAlt) return "abc";                                    // umlauts -> letters
+      return emojiCatalogCount() > 0 ? "emo" : "Uml";               // sym -> emoji or umlauts
+    }
     if (_mode == Mode::Num) return "0";
     return "sym";
   }
@@ -130,6 +148,12 @@ void KeypadApplet::commitPending() {
 void KeypadApplet::cycleMode() {
   if (_numericOnly) return;
   commitPending();
+  if (_symPage) {
+    // On the symbols pages the shift key toggles the accents' case (ab = äöü,
+    // AB = ÄÖÜ). It never leaves the page and never drops into digit mode.
+    _mode = (_mode == Mode::Upper || _mode == Mode::Shift) ? Mode::Lower : Mode::Upper;
+    return;
+  }
   _symPage = false;
   _mode = _mode == Mode::Lower ? Mode::Shift    // abc -> Abc -> ABC -> 123 -> abc
         : _mode == Mode::Shift ? Mode::Upper
@@ -140,6 +164,7 @@ void KeypadApplet::toggleSymPage() {
   if (_numericOnly) return;
   commitPending();
   _symPage = !_symPage;
+  _symAlt = false;
   if (_symPage) _mode = Mode::Lower;   // symbols are case-independent; normalize
 }
 
@@ -188,12 +213,18 @@ void KeypadApplet::cycleBottomLeft() {
   if (_numericOnly) return;
   commitPending();
   if (_emojiPage) { _emojiPage = false; return; }            // emoji -> letters
-  if (_symPage) {                                            // sym -> emoji (or letters)
-    _symPage = false;
-    if (emojiCatalogCount() > 0) { _emojiPage = true; _emojiPageIdx = 0; fillEmojiCells(); }
+  if (_symPage) {
+    if (_symAlt) {                                           // umlauts -> letters
+      _symPage = false; _symAlt = false;
+    } else if (emojiCatalogCount() > 0) {                    // sym -> emoji (like the original)
+      _symPage = false;
+      _emojiPage = true; _emojiPageIdx = 0; fillEmojiCells();
+    } else {                                                 // sym -> umlauts page
+      _symAlt = true;                                        // takes over the old "sym twice" slot
+    }
     return;
   }
-  _symPage = true; _mode = Mode::Lower;                      // letters -> sym
+  _symPage = true; _symAlt = false; _mode = Mode::Lower;     // letters -> sym (page 1)
 }
 
 void KeypadApplet::nextEmojiPage() {
@@ -349,8 +380,16 @@ void KeypadApplet::handleSelect() {
     if (_mode == Mode::Num) { commitPending(); insertCharAt(_cursor, '0'); _cursor++; return; }
     cycleBottomLeft(); return;   // letters -> sym -> emoji(if any) -> letters
   }
-  if (c == 1) { commitPending(); _cursor = prevCodepoint(_cursor); return; }   // cursor left
-  if (c == 2) { commitPending(); _cursor = nextCodepoint(_cursor); return; }   // cursor right
+  if (c == 1) {
+    commitPending();
+    if (_symPage) { _symAlt = !_symAlt; return; }   // symbols pages: ‹ flips to the umlauts & back
+    _cursor = prevCodepoint(_cursor); return;       // otherwise: cursor left
+  }
+  if (c == 2) {
+    commitPending();
+    if (_symPage) { _symAlt = !_symAlt; return; }   // symbols pages: › flips to the umlauts & back
+    _cursor = nextCodepoint(_cursor); return;       // otherwise: cursor right
+  }
   confirmAndExit();                                  // c == 3, OK
 }
 
@@ -389,6 +428,7 @@ void KeypadApplet::onStart(AppletContext& ctx) {
   _buf = _own;
   _mode = _numericOnly ? Mode::Num : Mode::Lower;
   _symPage = false;
+  _symAlt = false;
   _emojiPage = false;              // singleton: reset to the first page on every open
   _emojiPageIdx = 0;
   _langFocused = false;
@@ -421,15 +461,21 @@ int KeypadApplet::onRender(Canvas& c) {
 
   char tagbuf[8];
   const char* tag;
-  if (_emojiPage) {
+  if (_symPage) {
+    // The two symbols pages carry their own page indicator, like the emoji
+    // pages: 1/2 on the ASCII page, 2/2 on the umlauts/accents page.
+    snprintf(tagbuf, sizeof(tagbuf), "%d/2", _symAlt ? 2 : 1);
+    tag = tagbuf;
+    c.drawText(fontCaption(), c.width(), 3, tag, DisplayDriver::LIGHT, TextAlign::Right);
+  } else if (_emojiPage) {
     snprintf(tagbuf, sizeof(tagbuf), "%d/%d", _emojiPageIdx + 1, emojiPageCount());
     tag = tagbuf;
     c.drawText(fontCaption(), c.width(), 3, tag, DisplayDriver::LIGHT, TextAlign::Right);
   } else {
-    tag = langCode();
+    tag = langCode();                      // letters page: the language picker button
     int tw = c.textWidth(fontCaption(), tag);
     int tx = c.width() - tw;
-    if (_langFocused) {                    // inverted pill = focused button
+    if (_langFocused) {                                   // inverted pill = focused button
       c.fillRect(tx - 2, 0, tw + 3, topH - 1, DisplayDriver::LIGHT);
       c.drawText(fontCaption(), c.width() - 1, 3, tag, DisplayDriver::DARK, TextAlign::Right);
     } else {
@@ -495,7 +541,7 @@ bool KeypadApplet::onInput(InputEvent ev) {
   }
   switch (ev) {
     case InputEvent::NavLeft:
-    case InputEvent::NavRight:
+    case InputEvent::NavRight: {
       if (_emojiPage) {
         int nr = _grid.focusedRow(), nc = _grid.focusedCol();
         if (nr < 3 && ev == InputEvent::NavRight && nc == 3) { nextEmojiPage(); return true; }
@@ -503,8 +549,9 @@ bool KeypadApplet::onInput(InputEvent ev) {
       }
       commitPending();
       return _grid.onInput(ev);
+    }
     case InputEvent::NavUp:
-      if (!_emojiPage && _grid.focusedRow() == 0) {  // top row -> language button
+      if (!_emojiPage && !_symPage && _grid.focusedRow() == 0) {  // letters: top row -> language button
         commitPending();
         _langFocused = true;
         return true;

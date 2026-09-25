@@ -69,6 +69,7 @@ public:
   uint16_t cursor() const { return _cursor; }
   Mode mode() const { return _mode; }
   bool symPage() const { return _symPage; }
+  bool symAltPage() const { return _symAlt; }   // true = the special-characters (umlauts) page
   bool emojiPage() const { return _emojiPage; }
   int  emojiPageCount() const;              // ceil(count/12); 0 when no catalog
   int  langIndex() const { return _langIdx; }
@@ -82,7 +83,8 @@ public:
   void nextEmojiPage();                     // wraps
   void prevEmojiPage();                     // wraps
   void insertEmojiCell(int cell);           // cell 0..11 of the current page (no-op if blank)
-  void cycleMode();      // Lower -> Upper -> Num -> Lower; exits sym page
+  void cycleMode();      // letters: Lower -> Shift -> Upper -> Num -> Lower;
+                         // symbols pages: toggles the accents' case (ÄÖÜ), stays on the page
   void toggleSymPage();  // letters <-> symbols
 
   // UTF-8 codepoint -> bytes (1..4), NUL-terminated. Public for tests.
@@ -101,6 +103,7 @@ private:
   uint16_t _cursor;      // insertion index, 0.._len
   Mode _mode;
   bool _symPage;
+  bool _symAlt = false;   // second symbols page: the special-characters (umlauts) page
   bool _emojiPage = false;
   uint8_t _emojiPageIdx = 0;
   char _emojiCells[12][5];                   // UTF-8 of the current page's cells ("" = empty)

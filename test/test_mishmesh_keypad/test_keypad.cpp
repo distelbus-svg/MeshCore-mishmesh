@@ -53,7 +53,9 @@ TEST(Keypad, SymPageSwapsCharCells) {
   k.toggleSymPage();
   EXPECT_TRUE(k.symPage());
   EXPECT_STREQ(":;\"'", k.cellLabel(0, 1));
-  EXPECT_STREQ("abc",   k.cellLabel(3, 0));  // sym cell becomes return-to-letters
+  // Without a catalog, "sym twice" lands on the umlauts page - so the bottom-left
+  // label advertises it instead of bouncing straight back to letters.
+  EXPECT_STREQ("Uml",  k.cellLabel(3, 0));
   k.toggleSymPage();
   EXPECT_FALSE(k.symPage());
   EXPECT_STREQ("abc", k.cellLabel(0, 1));
@@ -94,6 +96,134 @@ struct Harness {
   Harness(KeypadApplet* k) : host(&d, ctx) { host.setRoot(k); }
   void tick(KeypadApplet* k, uint32_t now) { Canvas c(&d, now); k->onRender(c); }
 };
+
+}  // namespace
+
+// The requested German umlauts live on a second, *visible* special-characters
+// page. Latin layouts already multi-tap them on the letters, but they never
+// show on the caps; this page makes them one arrow-press away for every layout.
+TEST(Keypad, SymAltPageShowsUmlautsAndTypesThem) {
+  KeypadApplet k; Harness h(&k);
+  k.toggleSymPage();                            // symbols page 1 (ASCII)
+  EXPECT_FALSE(k.symAltPage());
+  k.setFocusForTest(3, 1);                      // the ‹ arrow key
+  EXPECT_TRUE(k.onInput(InputEvent::Select));   // flips -> umlauts/accents page
+  EXPECT_TRUE(k.symAltPage());
+  EXPECT_STREQ("äöü", k.cellLabel(0, 0));       // the umlauts, first cell
+  EXPECT_STREQ("ßåø", k.cellLabel(0, 1));
+
+  k.setFocusForTest(0, 0);
+  k.onInput(InputEvent::Select);                // ä
+  EXPECT_STREQ("ä", k.text());
+  k.onInput(InputEvent::Select);                // ö (replaces pending ä in place)
+  EXPECT_STREQ("ö", k.text());
+  k.onInput(InputEvent::Select);                // ü
+  EXPECT_STREQ("ü", k.text());
+  EXPECT_EQ(2u, k.length());                    // a single 2-byte glyph
+
+  k.setFocusForTest(3, 2);                      // the › arrow key
+  EXPECT_TRUE(k.onInput(InputEvent::Select));   // flips back to ASCII
+  EXPECT_FALSE(k.symAltPage());
+  EXPECT_STREQ(".,?!", k.cellLabel(0, 0));
+}
+
+TEST(Keypad, SymAltPageResetsOnExitAndReentry) {
+  KeypadApplet k; Harness h(&k);
+  k.toggleSymPage();
+  k.setFocusForTest(3, 1);
+  k.onInput(InputEvent::Select);                // ‹ -> umlauts
+  EXPECT_TRUE(k.symAltPage());
+  k.toggleSymPage();                            // back to letters
+  k.toggleSymPage();                            // symbols again: page 1, not umlauts
+  EXPECT_TRUE(k.symPage());
+  EXPECT_FALSE(k.symAltPage());
+
+  k.setFocusForTest(3, 2);
+  k.onInput(InputEvent::Select);                // › -> flip on
+  EXPECT_TRUE(k.symAltPage());
+  Harness h2(&k);                               // reopen -> onStart resets
+  EXPECT_FALSE(k.symPage());
+  EXPECT_FALSE(k.symAltPage());
+}
+
+TEST(Keypad, SymAltShiftTogglesUppercaseAccentsWithoutLeavingPage) {
+  KeypadApplet k; Harness h(&k);
+  k.toggleSymPage();
+  k.setFocusForTest(3, 1);
+  k.onInput(InputEvent::Select);            // ‹ -> onto the umlauts page
+  EXPECT_TRUE(k.symAltPage());
+  EXPECT_STREQ("äöü", k.cellLabel(0, 0));
+  EXPECT_EQ(KeypadApplet::Mode::Lower, k.mode());
+
+  k.cycleMode();                             // shift: toggles the page's case
+  EXPECT_TRUE(k.symAltPage());               // regression: this used to exit to letters
+  EXPECT_EQ(KeypadApplet::Mode::Upper, k.mode());
+  EXPECT_STREQ("ÄÖÜ", k.cellLabel(0, 0));    // the big umlauts
+
+  k.setFocusForTest(0, 0);
+  k.onInput(InputEvent::Select);             // Ä (2-byte, pending)
+  EXPECT_STREQ("Ä", k.text());
+  EXPECT_EQ(2u, k.length());
+
+  k.cycleMode();                             // back to lowercase, still on the page
+  EXPECT_TRUE(k.symAltPage());
+  EXPECT_STREQ("äöü", k.cellLabel(0, 0));
+}
+
+TEST(Keypad, SymTwiceLandsOnUmlautsThenLetters) {
+  // No catalog: the second bottom-left press used to bounce back to the letters
+  // page (the emoji page's slot). Now it opens the umlauts page instead.
+  KeypadApplet k; Harness h(&k);
+  k.cycleBottomLeft();                    // letters -> sym
+  EXPECT_TRUE(k.symPage());
+  EXPECT_FALSE(k.symAltPage());
+  k.cycleBottomLeft();                    // sym -> umlauts
+  EXPECT_TRUE(k.symAltPage());
+  EXPECT_STREQ("äöü", k.cellLabel(0, 0));
+  k.cycleBottomLeft();                    // umlauts -> letters
+  EXPECT_FALSE(k.symPage());
+  EXPECT_FALSE(k.symAltPage());
+}
+
+TEST(Keypad, SymbolArrowsFlipBetweenSymbolAndUmlautPages) {
+  // On the symbols pages the bottom-row ‹ › arrow keys flip page 1 <-> 2,
+  // just like the emoji page's arrows; elsewhere they still move the cursor.
+  KeypadApplet k; Harness h(&k);
+
+  // Letters page: pressing the arrows must not touch the page state.
+  k.setFocusForTest(3, 1);
+  k.onInput(InputEvent::Select);
+  EXPECT_FALSE(k.symPage());
+
+  k.cycleBottomLeft();                    // letters -> sym (page 1)
+  EXPECT_TRUE(k.symPage());
+  EXPECT_FALSE(k.symAltPage());
+
+  k.setFocusForTest(3, 1);                // press the ‹ arrow
+  k.onInput(InputEvent::Select);
+  EXPECT_TRUE(k.symPage());
+  EXPECT_TRUE(k.symAltPage());            // now page 2 (umlauts)
+  EXPECT_STREQ("äöü", k.cellLabel(0, 0));
+
+  k.setFocusForTest(3, 2);                // press the › arrow
+  k.onInput(InputEvent::Select);
+  EXPECT_TRUE(k.symPage());
+  EXPECT_FALSE(k.symAltPage());           // back on page 1
+  EXPECT_STREQ(".,?!", k.cellLabel(0, 0));
+
+  // Regression: navigating past the grid edges must NOT flip the symbols
+  // pages anymore. Only the ‹ › arrow keys (and the bottom-left button)
+  // move between page 1 and the umlauts page.
+  k.setFocusForTest(0, 3);                // right edge of a char row
+  k.onInput(InputEvent::NavRight);
+  EXPECT_TRUE(k.symPage());
+  EXPECT_FALSE(k.symAltPage());
+  EXPECT_STREQ(".,?!", k.cellLabel(0, 0));
+  k.setFocusForTest(0, 0);                // left edge
+  k.onInput(InputEvent::NavLeft);
+  EXPECT_TRUE(k.symPage());
+  EXPECT_FALSE(k.symAltPage());
+  EXPECT_STREQ(".,?!", k.cellLabel(0, 0));
 }
 
 TEST(Keypad, ReopenResetsToFirstPage) {
@@ -535,8 +665,13 @@ TEST_F(KeypadEmoji, DormantWithoutCatalog) {
   k.cycleBottomLeft();                       // letters -> sym
   EXPECT_TRUE(k.symPage());
   EXPECT_FALSE(k.emojiPage());
-  k.cycleBottomLeft();                       // sym -> letters (emoji skipped)
+  k.cycleBottomLeft();                       // sym -> umlauts page (the emoji slot)
+  EXPECT_TRUE(k.symPage());
+  EXPECT_TRUE(k.symAltPage());
+  EXPECT_FALSE(k.emojiPage());
+  k.cycleBottomLeft();                       // umlauts -> letters
   EXPECT_FALSE(k.symPage());
+  EXPECT_FALSE(k.symAltPage());
   EXPECT_FALSE(k.emojiPage());
 }
 
@@ -585,11 +720,14 @@ TEST_F(KeypadEmoji, BottomLeftLabelShowsNextState) {
   EXPECT_STREQ("abc", k.cellLabel(3, 0));   // emoji -> next is letters
 }
 
-TEST_F(KeypadEmoji, SymLabelStaysAbcWithoutCatalog) {
+TEST_F(KeypadEmoji, SymLabelShowsUmlautsWithoutCatalog) {
   setEmojiCatalog(nullptr, 0);
   KeypadApplet k;
   k.cycleBottomLeft();                      // letters -> sym
-  EXPECT_STREQ("abc", k.cellLabel(3, 0));   // no catalog -> next is letters
+  EXPECT_STREQ("Uml", k.cellLabel(3, 0));   // no catalog -> next is the umlauts page
+  k.cycleBottomLeft();
+  EXPECT_TRUE(k.symAltPage());
+  EXPECT_STREQ("abc", k.cellLabel(3, 0));   // umlauts -> next is letters
 }
 
 TEST(KbdLayouts, EnglishIsIndexZeroAndBaseline) {
