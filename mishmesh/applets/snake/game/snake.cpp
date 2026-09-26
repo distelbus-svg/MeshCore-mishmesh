@@ -345,4 +345,135 @@ void snakeRender(const SnakeState& g, uint8_t* buf) {
   }
 }
 
+// ---- persistence -----------------------------------------------------------
+
+// Record layout (all little-endian):
+//   [0]      magic (SNAKE_SAVE_MAGIC)
+//   [1]      version (SNAKE_SAVE_VERSION)
+//   [2]      state (u8)
+//   [3]      len
+//   [4]      fx
+//   [5]      fy
+//   [6]      hx (head x)
+//   [7]      hy (head y)
+//   [8..9]   score
+//   [10..11] best
+//   [12]     framesPerMove
+//   [13]     frameCounter
+//   [14]     dir (u8)
+//   [15..18] seed (u32)
+//   [19..]   packed 2-bit neighbor deltas for segments 1..len-1
+//
+// Delta codes, 0=Left 1=Up 2=Down 3=Right: the direction from seg[i-1] to
+// seg[i]. Packed LSB-first into the byte stream starting at bit 0 of byte 19.
+// Fixed 19-byte header + 2 bits per segment means even a full board (403 cells)
+// fits SNAKE_SAVE_CAP.
+static const uint16_t SAVE_HEADER = 19;
+
+uint16_t snakeExport(const SnakeState& g, uint8_t* out, uint16_t cap) {
+  if (out == nullptr) return 0;
+  if (g.len < 1 || g.len > GAME_CELLS) return 0;
+  uint16_t bits = (uint16_t)((g.len - 1) * 2);
+  uint16_t total = (uint16_t)(SAVE_HEADER + (bits + 7) / 8);
+  if (total > cap) return 0;
+
+  for (uint16_t i = 0; i < total; i++) out[i] = 0;   // deltas OR into these bytes
+
+  out[0] = SNAKE_SAVE_MAGIC;
+  out[1] = SNAKE_SAVE_VERSION;
+  out[2] = (uint8_t)g.state;
+  out[3] = g.len;
+  out[4] = g.fx;
+  out[5] = g.fy;
+  out[6] = g.segx[0];
+  out[7] = g.segy[0];
+  out[8] = (uint8_t)(g.score & 0xFF);
+  out[9] = (uint8_t)(g.score >> 8);
+  out[10] = (uint8_t)(g.best & 0xFF);
+  out[11] = (uint8_t)(g.best >> 8);
+  out[12] = g.framesPerMove;
+  out[13] = g.frameCounter;
+  out[14] = (uint8_t)g.dir;
+  out[15] = (uint8_t)(g.seed & 0xFF);
+  out[16] = (uint8_t)(g.seed >> 8);
+  out[17] = (uint8_t)(g.seed >> 16);
+  out[18] = (uint8_t)(g.seed >> 24);
+
+  uint16_t bitIdx = 0;
+  for (uint16_t i = 1; i < g.len; i++) {
+    int16_t dx = (int16_t)g.segx[i] - (int16_t)g.segx[i - 1];
+    int16_t dy = (int16_t)g.segy[i] - (int16_t)g.segy[i - 1];
+    uint8_t code;
+    if (dx == -1 && dy == 0)       code = 0;   // Left
+    else if (dx == 0 && dy == -1)  code = 1;   // Up
+    else if (dx == 0 && dy == 1)   code = 2;   // Down
+    else if (dx == 1 && dy == 0)   code = 3;   // Right
+    else return 0;                             // body not 4-connected
+    uint16_t b = (uint16_t)(SAVE_HEADER + (bitIdx >> 3));
+    uint8_t shift = (uint8_t)(bitIdx & 7);
+    out[b] = (uint8_t)(out[b] | (code << shift));
+    bitIdx += 2;
+  }
+  return total;
+}
+
+bool snakeImport(const uint8_t* in, uint16_t sz, SnakeState& g) {
+  if (in == nullptr || sz < SAVE_HEADER) return false;
+  if (in[0] != SNAKE_SAVE_MAGIC || in[1] != SNAKE_SAVE_VERSION) return false;
+  uint8_t len = in[3];
+  if (len < 1 || len > GAME_CELLS) return false;
+  uint16_t bits = (uint16_t)((len - 1) * 2);
+  uint16_t total = (uint16_t)(SAVE_HEADER + (bits + 7) / 8);
+  if (total > sz) return false;
+
+  SnakeState t;
+  t = SnakeState();
+  t.state = (State)in[2];
+  t.len = len;
+  t.fx = in[4];
+  t.fy = in[5];
+  t.score = (uint16_t)(in[8] | (in[9] << 8));
+  t.best = (uint16_t)(in[10] | (in[11] << 8));
+  t.framesPerMove = in[12];
+  t.frameCounter = in[13];
+  t.dir = (Dir)in[14];
+  t.seed = (uint32_t)in[15] | ((uint32_t)in[16] << 8) |
+           ((uint32_t)in[17] << 16) | ((uint32_t)in[18] << 24);
+
+  // Reconstruct the body by walking the deltas from the saved head.
+  t.segx[0] = in[6];
+  t.segy[0] = in[7];
+  if (t.segx[0] >= GAME_COLS || t.segy[0] >= GAME_ROWS) return false;
+  uint16_t bitIdx = 0;
+  for (uint16_t i = 1; i < len; i++) {
+    uint16_t b = (uint16_t)(SAVE_HEADER + (bitIdx >> 3));
+    uint8_t shift = (uint8_t)(bitIdx & 7);
+    uint8_t code = (uint8_t)((in[b] >> shift) & 0x3);
+    int16_t dx = 0, dy = 0;
+    switch (code) {                    // 0=Left 1=Up 2=Down 3=Right
+      case 0: dx = -1; break;
+      case 1: dy = -1; break;
+      case 2: dy = 1;  break;
+      case 3: dx = 1;  break;
+    }
+    int16_t nx = (int16_t)t.segx[i - 1] + dx;
+    int16_t ny = (int16_t)t.segy[i - 1] + dy;
+    if (nx < 0 || ny < 0 || nx >= GAME_COLS || ny >= GAME_ROWS) return false;
+    t.segx[i] = (uint8_t)nx;
+    t.segy[i] = (uint8_t)ny;
+    bitIdx += 2;
+  }
+
+  // Food must not sit on the body, and body cells must not overlap.
+  for (uint16_t i = 0; i < len; i++) {
+    if (t.segx[i] == t.fx && t.segy[i] == t.fy) return false;
+    for (uint16_t j = 0; j < i; j++) {
+      if (t.segx[i] == t.segx[j] && t.segy[i] == t.segy[j]) return false;
+    }
+  }
+
+  g = t;
+  return true;
+}
+
 }}  // namespace mishmesh::snake

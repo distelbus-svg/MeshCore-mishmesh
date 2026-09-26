@@ -64,9 +64,18 @@ Two separate complaints have been filed against the snake before too:
    stay comfortably inside that budget and add no new dependencies, no heap
    allocation, and no new libraries.
 6. **No user-data dependency.** The user updates the device by dropping the
-   firmware zip without wiping — any prior applet state, contacts, messages, etc.
-   must be irrelevant to the snake. Best score persists in RAM for the applet
-   session only (this is acceptable and matches today).
+    firmware zip without wiping — any prior applet state, contacts, messages, etc.
+    must be irrelevant to the snake. Best score persists in RAM for the applet
+    session only (this is acceptable and matches today).
+7. **Leave-and-resume.** Pressing Back pauses nothing in-game: it just pops to the
+    menu. Re-entering the applet must resume the same board, body, score and
+    best (both across menu trips and across firmware updates, since the applet's
+    128-byte EEPROM blob survives re-flashing without a wipe). Only a running or
+    paused game resumes; a finished (Dead) or not-yet-started (Ready) one starts
+    fresh. Resume uses a compact record (19-byte header + 2 bits per body
+    segment, see `snakeExport`/`snakeImport`), kept strictly inside the applet's
+    128-byte EEPROM image with magic/version/bounds checks so garbage can never
+    crash the applet.
 
 ---
 
@@ -225,7 +234,8 @@ State machine: `Ready → Running ⇄ Paused`, `Dead → (any active action) →
 
 | Trigger | Result |
 |---|---|
-| App starts (`onStart`) | `snakeReset(g, random seed)` → `Ready`, len 1, score 0, best kept, food placed off-body |
+| App starts (`onStart`) | try to import the saved record; if it restores a Running/Paused game, resume it — otherwise `snakeReset(g, random seed)` → fresh `Ready`, len 2, score 0, best kept, food placed off-body |
+| App stops (`onStop`) | `snakeExport` the whole game into the applet's 128-byte EEPROM blob and flush it, so leaving to the menu (or a later firmware update without a wipe) resumes the same board, score and best |
 | `Select` (snakeToggle) | Ready→Running, Running→Paused, Paused→Running, Dead→fresh Ready |
 | Direction input while Running | set `dir` immediately; **ignore 180° reversal** |
 | Move tick | every `framesPerMove` frames: compute `(nx,ny) = head + dir`; if outside grid → Dead; if hitting body (excluding the tail slot that vacates this tick) → Dead; if board full → Dead (win); else slide body and insert new head |

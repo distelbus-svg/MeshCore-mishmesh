@@ -76,4 +76,18 @@ bool snakeOccupies(const SnakeState& g, uint8_t x, uint8_t y);
 // own test helpers.
 void snakeRender(const SnakeState& g, uint8_t* buf);
 
+// Persistence for the "leave and resume later" flow. The whole game -- body and
+// state -- packs into SNAKE_SAVE_CAP bytes by storing each body segment as a
+// 2-bit neighbor delta walked from the head (a snake is always 4-connected), so
+// even a full board fits the EEPROM image. snakeExport writes the record and
+// returns its length (bytes); snakeImport validates it (magic/version/bounds)
+// and restores the state, returning false on anything that is not a self-
+// consistent snake save. The caller then decides whether to resume or reset
+// (e.g. only resume Running/Paused games).
+static const uint16_t SNAKE_SAVE_CAP = 128;
+static const uint8_t  SNAKE_SAVE_MAGIC = 0x53;      // 'S'
+static const uint8_t  SNAKE_SAVE_VERSION = 1;
+uint16_t snakeExport(const SnakeState& g, uint8_t* out, uint16_t cap);
+bool     snakeImport(const uint8_t* in, uint16_t sz, SnakeState& g);
+
 }}  // namespace mishmesh::snake

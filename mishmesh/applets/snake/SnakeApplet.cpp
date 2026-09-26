@@ -2,6 +2,7 @@
 #include <mishmesh/core/AppletRegistry.h>
 #include <mishmesh/core/Canvas.h>
 #include <mishmesh/text/Fonts.h>
+#include <mishmesh/arduboy/ArduboyEeprom.h>
 #include <Arduboy2.h>
 
 namespace mishmesh {
@@ -22,9 +23,18 @@ Dir dirFromButtons(uint8_t b) {
 }  // namespace
 
 void SnakeApplet::onStart(AppletContext& ctx) {
-  _runtime.begin(ctx, "snake");
+  _runtime.begin(ctx, "snake");           // loads this applet's EEPROM blob from storage
   s_arduboy.beginDoFirst();               // no-op boot on the mishmesh backend
-  snake::snakeReset(_g, (uint32_t)random(0x7FFFFFFF));
+
+  uint8_t blob[snake::SNAKE_SAVE_CAP];
+  for (uint16_t i = 0; i < sizeof(blob); i++) blob[i] = mishmesh::arduboy::eeprom().read(i);
+  bool resumed = snake::snakeImport(blob, sizeof(blob), _g);
+  // Only running/paused games resume; a fresh or finished one starts over.
+  if (!resumed ||
+      (_g.state != snake::State::Running && _g.state != snake::State::Paused)) {
+    _g = snake::SnakeState();
+    snake::snakeReset(_g, (uint32_t)random(0x7FFFFFFF));
+  }
 }
 
 int SnakeApplet::onRender(Canvas& c) {
@@ -47,6 +57,19 @@ bool SnakeApplet::onInput(InputEvent ev) {
     return false;                         // pop back to the app menu
   }
   return false;                           // directions reach the game via pumpButtons()
+}
+
+void SnakeApplet::onStop() {
+  // Persist the whole game (compactly packed) so leaving to the menu and coming
+  // back later resumes the same board, score and body; saveIfDirty flushes.
+  uint8_t blob[snake::SNAKE_SAVE_CAP];
+  uint16_t n = snake::snakeExport(_g, blob, sizeof(blob));
+  if (n) {
+    for (uint16_t i = 0; i < n; i++) mishmesh::arduboy::eeprom().write(i, blob[i]);
+  } else {
+    mishmesh::arduboy::eeprom().write(0, 0);   // nothing coherent to resume
+  }
+  _runtime.saveIfDirty();
 }
 
 static SnakeApplet s_snake;

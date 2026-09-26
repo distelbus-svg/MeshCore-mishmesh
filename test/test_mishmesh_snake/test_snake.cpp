@@ -22,6 +22,43 @@ bool px(const uint8_t* buf, uint16_t x, uint16_t y) {
   return (buf[(uint16_t)(y >> 3) * DISPLAY_W + x] & (1u << (y & 7))) != 0;
 }
 
+// Fill `len` cells of a full-board zigzag path (head at (0,0); even rows go
+// left->right, odd rows right->left, so every consecutive pair is adjacent).
+void buildZigZag(SnakeState& g, uint16_t len) {
+  uint16_t i = 0;
+  for (uint8_t y = 0; y < GAME_ROWS && i < len; y++) {
+    if ((y & 1) == 0) {
+      for (uint8_t x = 0; x < GAME_COLS && i < len; x++) { g.segx[i] = x; g.segy[i] = y; i++; }
+    } else {
+      for (uint8_t x = GAME_COLS - 1; x != 0xFF && i < len; x--) { g.segx[i] = x; g.segy[i] = y; i++; }
+    }
+  }
+  g.len = (uint8_t)len;
+}
+
+void placeFoodOffBody(SnakeState& g) {
+  for (uint8_t x = 0; x < GAME_COLS; x++)
+    for (uint8_t y = 0; y < GAME_ROWS; y++)
+      if (!snakeOccupies(g, x, y)) { g.fx = x; g.fy = y; return; }
+}
+
+void expectSameGame(const SnakeState& a, const SnakeState& b) {
+  EXPECT_EQ(b.state, a.state);
+  EXPECT_EQ(b.len, a.len);
+  EXPECT_EQ(b.fx, a.fx);
+  EXPECT_EQ(b.fy, a.fy);
+  EXPECT_EQ(b.score, a.score);
+  EXPECT_EQ(b.best, a.best);
+  EXPECT_EQ(b.framesPerMove, a.framesPerMove);
+  EXPECT_EQ(b.frameCounter, a.frameCounter);
+  EXPECT_EQ((uint8_t)b.dir, (uint8_t)a.dir);
+  EXPECT_EQ(b.seed, a.seed);
+  for (uint16_t i = 0; i < a.len; i++) {
+    EXPECT_EQ(b.segx[i], a.segx[i]);
+    EXPECT_EQ(b.segy[i], a.segy[i]);
+  }
+}
+
 }  // namespace
 
 TEST(SnakeLogic, ResetPlacesHeadCenterAndFoodOffBody) {
@@ -179,6 +216,143 @@ TEST(SnakeLogic, DeadToggleStartsFreshGame) {
   EXPECT_EQ(g.score, 0);
   EXPECT_EQ(g.len, 2);
   EXPECT_EQ(g.segx[0], GAME_COLS / 2);
+}
+
+// --- Persistence ------------------------------------------------------------
+
+TEST(SnakeSave, RoundTripPausedShortGame) {
+  SnakeState g;
+  snakeReset(g, 0xBEEF);
+  g.state = State::Paused;
+  g.dir = Dir::Right;
+  g.frameCounter = 3;
+  g.score = 5;
+  g.best = 9;
+  g.segx[0] = 16; g.segy[0] = 6;   // keep the 2-segment start body
+  g.segx[1] = 15; g.segy[1] = 6;
+  placeFoodOffBody(g);
+
+  uint8_t blob[SNAKE_SAVE_CAP];
+  uint16_t n = snakeExport(g, blob, sizeof(blob));
+  ASSERT_GT(n, 0);
+
+  SnakeState g2;
+  ASSERT_TRUE(snakeImport(blob, sizeof(blob), g2));
+  expectSameGame(g, g2);
+}
+
+TEST(SnakeSave, RoundTripLongBody) {
+  SnakeState g;
+  g = SnakeState();
+  buildZigZag(g, 200);            // a 200-cell winding body
+  placeFoodOffBody(g);
+  g.frameCounter = 5;
+
+  uint8_t blob[SNAKE_SAVE_CAP];
+  uint16_t n = snakeExport(g, blob, sizeof(blob));
+  ASSERT_GT(n, 0);
+
+  SnakeState g2;
+  ASSERT_TRUE(snakeImport(blob, n, g2));
+  expectSameGame(g, g2);
+}
+
+TEST(SnakeSave, MaxLengthFitsCapButFoodOnBodyRejected) {
+  SnakeState g;
+  g = SnakeState();
+  buildZigZag(g, 255);            // max expressible length (len is u8; full board
+  g.len = 255;                    // 403 cells would need fewer than 255 plus
+                                  // eating one more, so no real game stores more)
+  g.fx = g.segx[0]; g.fy = g.segy[0];   // food planted on the snake's head
+
+  uint8_t blob[SNAKE_SAVE_CAP];
+  uint16_t n = snakeExport(g, blob, sizeof(blob));
+  ASSERT_GT(n, 0);
+  ASSERT_LE(n, SNAKE_SAVE_CAP);
+
+  // A save whose food sits on the body cannot describe a playable game; import
+  // must refuse it so the applet falls back to a fresh reset.
+  SnakeState g2;
+  EXPECT_FALSE(snakeImport(blob, n, g2));
+}
+
+TEST(SnakeSave, ExportRejectsDisconnectedBody) {
+  SnakeState g;
+  snakeReset(g, 1);
+  g.len = 3;
+  g.segx[2] = g.segx[0] + 2;      // seg[2] is two cells away, not adjacent
+  g.segy[2] = g.segy[0];
+  uint8_t blob[SNAKE_SAVE_CAP];
+  EXPECT_EQ(snakeExport(g, blob, sizeof(blob)), 0);
+}
+
+TEST(SnakeSave, ImportRejectsGarbageAndTruncation) {
+  uint8_t blob[SNAKE_SAVE_CAP] = { 0 };
+  SnakeState g;
+
+  // Empty / zeroed buffer.
+  EXPECT_FALSE(snakeImport(blob, sizeof(blob), g));
+
+  // Wrong magic.
+  blob[0] = 0x42;
+  EXPECT_FALSE(snakeImport(blob, sizeof(blob), g));
+
+  // Record claims a huge body but the buffer is truncated after the header.
+  blob[0] = SNAKE_SAVE_MAGIC;
+  blob[1] = SNAKE_SAVE_VERSION;
+  blob[3] = GAME_CELLS;
+  EXPECT_FALSE(snakeImport(blob, 19, g));
+
+  // len == 0 is nonsense.
+  blob[3] = 0;
+  EXPECT_FALSE(snakeImport(blob, sizeof(blob), g));
+
+  // A valid record, truncated mid-payload.
+  SnakeState gv;
+  snakeReset(gv, 1);
+  uint16_t n = snakeExport(gv, blob, sizeof(blob));
+  ASSERT_GT(n, 0);
+  EXPECT_FALSE(snakeImport(blob, n - 1, g));
+}
+
+TEST(SnakeSave, ImportRejectsDeltaOffBoard) {
+  uint8_t blob[SNAKE_SAVE_CAP] = { 0 };
+  blob[0] = SNAKE_SAVE_MAGIC;
+  blob[1] = SNAKE_SAVE_VERSION;
+  blob[2] = (uint8_t)State::Running;
+  blob[3] = 3;                    // head + 2 tail segments
+  blob[4] = 31; blob[5] = 12;     // food aimlessly placed; validation stops earlier
+  blob[6] = 0;  blob[7] = 0;      // head at the west wall
+  blob[8] = 0;  blob[9] = 0;      // score
+  blob[10] = 0; blob[11] = 0;     // best
+  blob[12] = 6;                   // framesPerMove
+  blob[13] = 0;                   // frameCounter
+  blob[14] = 3;                   // dir Right
+  blob[15] = 0;                   // seed 0
+  blob[18] = 0;                   // seed hi
+  blob[19] = 0;                   // delta Left -> head moves off the west wall
+  SnakeState g;
+  EXPECT_FALSE(snakeImport(blob, sizeof(blob), g));
+}
+
+TEST(SnakeSave, ImportRejectsSelfOverlap) {
+  uint8_t blob[SNAKE_SAVE_CAP] = { 0 };
+  blob[0] = SNAKE_SAVE_MAGIC;
+  blob[1] = SNAKE_SAVE_VERSION;
+  blob[2] = (uint8_t)State::Running;
+  blob[3] = 5;                    // head + 4 tail segments
+  blob[4] = 1;  blob[5] = 1;      // food
+  blob[6] = 5;  blob[7] = 5;      // head
+  blob[8] = 0;  blob[9] = 0;
+  blob[10] = 0; blob[11] = 0;
+  blob[12] = 6;
+  blob[13] = 0;
+  blob[14] = 3;                   // dir Right
+  blob[18] = 0;
+  // deltas: Right(3) Down(2) Left(0) Up(1) -> tail walks back onto the head.
+  blob[19] = 3 | (2 << 2) | (0 << 4) | (1 << 6);
+  SnakeState g;
+  EXPECT_FALSE(snakeImport(blob, sizeof(blob), g));
 }
 
 // --- Renderer ---------------------------------------------------------------
