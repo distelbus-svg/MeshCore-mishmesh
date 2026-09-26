@@ -120,7 +120,6 @@ void snakeFrame(SnakeState& g, Dir want) {
     g.len++;
     g.score++;
     if (g.score > g.best) g.best = g.score;
-    if (g.framesPerMove > 2) g.framesPerMove--;
     placeFood(g);
   }
 }
@@ -283,6 +282,9 @@ void drawBanner(uint8_t* buf, const BannerLine* ls, uint8_t n, uint8_t y) {
   uint8_t x = (uint8_t)((128 - w) / 2);
   borderRect(buf, x, y, w, h);
   borderRect(buf, (uint8_t)(x + 1), (uint8_t)(y + 1), (uint8_t)(w - 2), (uint8_t)(h - 2));
+  // Blank the card interior so the snake/food behind it cannot show through
+  // the "black" areas; the text is drawn on top afterwards.
+  clearRect(buf, (uint8_t)(x + 2), (uint8_t)(y + 2), (uint8_t)(w - 4), (uint8_t)(h - 4));
   uint8_t cy = (uint8_t)(y + 4);
   for (uint8_t i = 0; i < n; i++) {
     uint8_t lw = stringWidth(ls[i].s, ls[i].scale);

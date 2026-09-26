@@ -35,7 +35,7 @@ struct SnakeState {
   uint8_t  fx = 8, fy = 6;          // food cell
   uint16_t score = 0;               // food eaten this game
   uint16_t best = 0;                // best this applet session (RAM only)
-  uint8_t  framesPerMove = 6;       // frames between moves; speeds up as you eat
+  uint8_t  framesPerMove = 6;       // frames between moves (constant pace)
   uint8_t  frameCounter = 0;
   Dir      dir = Dir::None;
   uint8_t  segx[GAME_CELLS];        // head at segx[0]/segy[0]

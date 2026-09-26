@@ -229,7 +229,7 @@ State machine: `Ready → Running ⇄ Paused`, `Dead → (any active action) →
 | `Select` (snakeToggle) | Ready→Running, Running→Paused, Paused→Running, Dead→fresh Ready |
 | Direction input while Running | set `dir` immediately; **ignore 180° reversal** |
 | Move tick | every `framesPerMove` frames: compute `(nx,ny) = head + dir`; if outside grid → Dead; if hitting body (excluding the tail slot that vacates this tick) → Dead; if board full → Dead (win); else slide body and insert new head |
-| Food eaten | score++, len++, best update, `framesPerMove` decreases (min 2), new food placed on a free cell |
+| Food eaten | score++, len++, best update, new food placed on a free cell. Pace is constant (`framesPerMove` never changes) — a deliberate deviation from the classic speed-up, set by user preference |
 | Ready/Paused/Dead | no movement input effect (except dead→ready via toggle) |
 
 RNG: `xorshift32` for food placement; seed comes from

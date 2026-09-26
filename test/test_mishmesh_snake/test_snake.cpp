@@ -96,8 +96,8 @@ TEST(SnakeLogic, EatsFoodGrowsAndScores) {
   EXPECT_EQ(g.score, 1);
   EXPECT_EQ(g.len, 3);              // started 2 long; this apple makes 3
   EXPECT_NE(g.fx, (uint8_t)(g.segx[0] + 1));   // food relocated
-  // Speed up: base 6 frames/move; one fruit -> 5.
-  EXPECT_EQ(g.framesPerMove, 5);
+  // Pace is constant: base 6 frames/move, unchanged by eating.
+  EXPECT_EQ(g.framesPerMove, 6);
 }
 
 TEST(SnakeLogic, WallKillsLeft) {
@@ -218,6 +218,7 @@ TEST(SnakeRender, BufferIsPageAddressedNotColumnMajor) {
 TEST(SnakeRender, PaintsHeadFoodHudAndFrame) {
   SnakeState g;
   snakeReset(g, 1);
+  snakeToggle(g);                 // running: no banner covering the arena
   uint8_t buf[FRAME_BUF_BYTES];
   snakeRender(g, buf);
 
