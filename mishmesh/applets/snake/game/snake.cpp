@@ -62,6 +62,8 @@ void snakeReset(SnakeState& g, uint32_t seed) {
   g.seed = seed ? seed : 0x7F4A7C15u;
   g.segx[0] = GAME_COLS / 2;
   g.segy[0] = GAME_ROWS / 2;
+  g.segx[1] = GAME_COLS / 2 - 1;   // tail: one cell behind the head
+  g.segy[1] = GAME_ROWS / 2;
   placeFood(g);
 }
 

@@ -28,9 +28,11 @@ TEST(SnakeLogic, ResetPlacesHeadCenterAndFoodOffBody) {
   SnakeState g;
   snakeReset(g, 0xDEAD);
   EXPECT_EQ(g.state, State::Ready);
-  EXPECT_EQ(g.len, 1);
+  EXPECT_EQ(g.len, 2);
   EXPECT_EQ(g.segx[0], GAME_COLS / 2);
   EXPECT_EQ(g.segy[0], GAME_ROWS / 2);
+  EXPECT_EQ(g.segx[1], GAME_COLS / 2 - 1);   // tail: one cell behind the head
+  EXPECT_EQ(g.segy[1], GAME_ROWS / 2);
   EXPECT_FALSE(snakeOccupies(g, g.fx, g.fy));
   EXPECT_EQ(g.score, 0);
   EXPECT_EQ(g.framesPerMove, 6);
@@ -92,7 +94,7 @@ TEST(SnakeLogic, EatsFoodGrowsAndScores) {
   g.fy = g.segy[0];
   snakeFrame(g, Dir::Right);
   EXPECT_EQ(g.score, 1);
-  EXPECT_EQ(g.len, 2);
+  EXPECT_EQ(g.len, 3);              // started 2 long; this apple makes 3
   EXPECT_NE(g.fx, (uint8_t)(g.segx[0] + 1));   // food relocated
   // Speed up: base 6 frames/move; one fruit -> 5.
   EXPECT_EQ(g.framesPerMove, 5);
@@ -175,7 +177,7 @@ TEST(SnakeLogic, DeadToggleStartsFreshGame) {
   snakeToggle(g);                 // restart from death
   EXPECT_EQ(g.state, State::Ready);
   EXPECT_EQ(g.score, 0);
-  EXPECT_EQ(g.len, 1);
+  EXPECT_EQ(g.len, 2);
   EXPECT_EQ(g.segx[0], GAME_COLS / 2);
 }
 

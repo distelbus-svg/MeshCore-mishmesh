@@ -29,7 +29,9 @@ enum class State : uint8_t { Ready = 0, Running, Paused, Dead };
 
 struct SnakeState {
   State    state = State::Ready;
-  uint8_t  len = 1;                 // occupied segments; index 0 is the head
+  uint8_t  len = 2;                 // occupied segments; index 0 is the head.
+                                    // A fresh snake is 2 segments: the size it
+                                    // would be after eating one apple.
   uint8_t  fx = 8, fy = 6;          // food cell
   uint16_t score = 0;               // food eaten this game
   uint16_t best = 0;                // best this applet session (RAM only)
