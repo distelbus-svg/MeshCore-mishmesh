@@ -12,6 +12,10 @@ inline uint32_t xorshift(uint32_t& s) {
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// Game logic
+// ---------------------------------------------------------------------------
+
 bool snakeOccupies(const SnakeState& g, uint8_t x, uint8_t y) {
   for (uint8_t i = 0; i < g.len; i++) {
     if (g.segx[i] == x && g.segy[i] == y) return true;
@@ -52,12 +56,9 @@ static void kill(SnakeState& g) {
 }
 
 void snakeReset(SnakeState& g, uint32_t seed) {
-  g.state = State::Ready;
-  g.len = 1;
-  g.score = 0;
-  g.dir = Dir::None;
-  g.frameCounter = 0;
-  g.framesPerMove = 6;
+  uint16_t best = g.best;
+  g = SnakeState();
+  g.best = best;
   g.seed = seed ? seed : 0x7F4A7C15u;
   g.segx[0] = GAME_COLS / 2;
   g.segy[0] = GAME_ROWS / 2;
@@ -65,8 +66,7 @@ void snakeReset(SnakeState& g, uint32_t seed) {
 }
 
 void snakeFrame(SnakeState& g, Dir want) {
-  if (g.state == State::Ready) { return; }
-  if (g.state != State::Running) { return; }
+  if (g.state != State::Running) return;
 
   if (want != Dir::None) {
     bool reverse =
@@ -77,9 +77,9 @@ void snakeFrame(SnakeState& g, Dir want) {
     if (!reverse) g.dir = want;
   }
 
-  if (++g.frameCounter < g.framesPerMove) { return; }
+  if (++g.frameCounter < g.framesPerMove) return;
   g.frameCounter = 0;
-  if (g.dir == Dir::None) { return; }
+  if (g.dir == Dir::None) return;
 
   int16_t dx = 0, dy = 0;
   switch (g.dir) {
@@ -128,19 +128,26 @@ void snakeToggle(SnakeState& g) {
     case State::Ready:   g.state = State::Running; g.dir = Dir::None; break;
     case State::Running: g.state = State::Paused;  break;
     case State::Paused:  g.state = State::Running; break;
-    case State::Dead:    snakeReset(g, g.seed);    break;
+    case State::Dead:    snakeReset(g, g.seed);     break;
   }
 }
 
-// ---- renderer (128x64 column-major 1bpp, Arduboy buffer layout) ----
+// ---------------------------------------------------------------------------
+// Renderer -- page-addressed 1bpp buffer, matching Arduboy2Base::sBuffer exactly.
+// ---------------------------------------------------------------------------
 
 namespace {
 
 const uint8_t SEP_Y = 6;                 // separator under the HUD strip
 
-void setPx(uint8_t* buf, uint8_t x, uint8_t y) {
-  if (x >= 128 || y >= 64) return;
-  buf[(x << 3) + (y >> 3)] |= (uint8_t)(1u << (y & 7));
+// buf[(y>>3)*DISPLAY_W + x], bit (y&7) -- see the big comment in snake.h.
+inline void setPx(uint8_t* buf, uint8_t x, uint8_t y) {
+  if (x >= DISPLAY_W || y >= DISPLAY_H) return;
+  buf[(uint16_t)(y >> 3) * DISPLAY_W + x] |= (uint8_t)(1u << (y & 7));
+}
+inline void clearPx(uint8_t* buf, uint8_t x, uint8_t y) {
+  if (x >= DISPLAY_W || y >= DISPLAY_H) return;
+  buf[(uint16_t)(y >> 3) * DISPLAY_W + x] &= (uint8_t)~(1u << (y & 7));
 }
 void setRect(uint8_t* buf, uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
   for (uint8_t yy = y; yy < (uint8_t)(y + h); yy++)
@@ -148,8 +155,7 @@ void setRect(uint8_t* buf, uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
 }
 void clearRect(uint8_t* buf, uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
   for (uint8_t yy = y; yy < (uint8_t)(y + h); yy++)
-    for (uint8_t xx = x; xx < (uint8_t)(x + w); xx++)
-      buf[(xx << 3) + (yy >> 3)] &= (uint8_t)~(1u << (yy & 7));
+    for (uint8_t xx = x; xx < (uint8_t)(x + w); xx++) clearPx(buf, xx, yy);
 }
 
 void borderRect(uint8_t* buf, uint8_t x, uint8_t y, uint8_t w, uint8_t h) {

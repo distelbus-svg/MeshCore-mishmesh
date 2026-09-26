@@ -1,16 +1,19 @@
 #pragma once
 #include <stdint.h>
 
-// Pure-logic snake game for mishmesh, mirroring the 2048 applet layout
+// Pure-logic snake game for mishmesh, mirroring the 2048 applet's module split
 // (game module + ArduboyRuntime bridge). This header is Arduino-free so the whole
-// game is unit-testable on the host.
+// game -- including the renderer -- is unit-testable on the host.
 
 namespace mishmesh { namespace snake {
 
 static const uint8_t GAME_COLS = 31;             // arena cells; 31*4px fits inside the 128px frame
 static const uint8_t GAME_ROWS = 13;             // 13*4px under the 8px HUD strip
 static const uint16_t GAME_CELLS = GAME_COLS * GAME_ROWS;
-static const uint16_t FRAME_BUF_BYTES = 128 * 64 / 8;
+
+static const uint8_t DISPLAY_W = 128;
+static const uint8_t DISPLAY_H = 64;
+static const uint16_t FRAME_BUF_BYTES = (uint16_t)(DISPLAY_W * DISPLAY_H / 8);
 
 // Renderer geometry: the board is a visible 1px frame around the cell arena.
 static const uint8_t CELL_PX = 4;                // one cell in display pixels
@@ -52,8 +55,23 @@ void snakeToggle(SnakeState& g);
 // True when cell (x, y) is occupied by the snake body (head included).
 bool snakeOccupies(const SnakeState& g, uint8_t x, uint8_t y);
 
-// Render the whole game into a 128x64 column-major 1bpp buffer (Arduboy layout:
-// buf[(x << 3) + (y >> 3)] bit (y & 7)). Clears the buffer first.
+// Render the whole game into a 128x64 1bpp buffer laid out exactly like Arduboy2's
+// sBuffer / the panel's native GDDRAM: page-addressed, NOT column-major. Each byte
+// covers 8 vertically-stacked pixels within one 8-row "page":
+//
+//   buf[(y >> 3) * DISPLAY_W + x]   bit (y & 7), LSB = the page's top row.
+//
+// This is the same formula as the real (vendored, unmodified) Arduboy2Base::
+// drawPixel/getPixel, and it is what SnakeApplet blits straight through
+// ArduboyRuntime::present() -> coreBlitCurrent() -> Canvas::blit1bpp() with no
+// transposition in between. Getting this formula right is the whole ballgame:
+// an earlier revision used a genuinely column-major layout (x*8 + y/8) here. Every
+// shape still came out correct under this file's OWN pixel-reader, so the host
+// tests were green -- but the real display driver reads the bytes with the formula
+// above, so every byte landed at the wrong screen position and the game rendered
+// as scattered dots on real hardware. Never change this indexing without also
+// checking it against Arduboy2Base's actual sBuffer layout, not just this file's
+// own test helpers.
 void snakeRender(const SnakeState& g, uint8_t* buf);
 
 }}  // namespace mishmesh::snake
