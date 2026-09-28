@@ -37,7 +37,8 @@ struct SnakeState {
   uint16_t best = 0;                // best this applet session (RAM only)
   uint8_t  framesPerMove = 6;       // frames between moves (constant pace)
   uint8_t  frameCounter = 0;
-  Dir      dir = Dir::None;
+  Dir      dir = Dir::None;           // committed: the way the head actually moves
+  Dir      want = Dir::None;          // queued steering, committed at the next tick
   uint8_t  segx[GAME_CELLS];        // head at segx[0]/segy[0]
   uint8_t  segy[GAME_CELLS];
   uint32_t seed = 0x7F4A7C15u;      // food RNG (xorshift)

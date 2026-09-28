@@ -112,12 +112,121 @@ TEST(SnakeLogic, ReversalIsIgnored) {
   SnakeState g;
   snakeReset(g, 0xDEAD);
   snakeToggle(g);
-  snakeFrame(g, Dir::Right);
-  playFrames(g, Dir::Right, 1);   // one move east
+  playFrames(g, Dir::Right, g.framesPerMove + 1);   // commit Right, move east
   uint8_t hx = g.segx[0];
-  snakeFrame(g, Dir::Left);       // 180-degree turn is invalid
-  playFrames(g, Dir::Left, 7);    // enough frames to move again
-  EXPECT_EQ(g.segx[0], (uint8_t)(hx + 1));   // kept going east, not west
+  EXPECT_EQ(g.dir, Dir::Right);
+  playFrames(g, Dir::Left, g.framesPerMove + 1);    // 180-degree turn is invalid
+  EXPECT_EQ(g.segx[0], (uint8_t)(hx + 1));           // kept going east, not west
+  EXPECT_EQ(g.dir, Dir::Right);
+}
+
+// Laying a body out along a row/column, head at one end, `travel` pointing the
+// way it is moving - so the body always trails behind the head.
+static void layBody(SnakeState& g, uint8_t hx, uint8_t hy, Dir travel, uint8_t len) {
+  g.len = len;
+  for (uint8_t i = 0; i < len; i++) {
+    g.segx[i] = hx;
+    g.segy[i] = hy;
+    if (i == 0) continue;
+    switch (travel) {
+      case Dir::Left:  g.segx[i] = (uint8_t)(hx + i); break;
+      case Dir::Right: g.segx[i] = (uint8_t)(hx - i); break;
+      case Dir::Up:    g.segy[i] = (uint8_t)(hy + i); break;
+      case Dir::Down:  g.segy[i] = (uint8_t)(hy - i); break;
+      default: break;
+    }
+  }
+  g.dir = travel;
+  placeFoodOffBody(g);
+  g.frameCounter = g.framesPerMove - 2;   // two input frames land before the move
+}
+
+// Regression: two taps inside one move window used to slip a 180-degree turn
+// past the reversal check, because each press was validated against the
+// previously *pressed* direction rather than the one the head was actually
+// travelling in. Heading east, tapping Up then Left validated Left against the
+// queued Up (fine) and committed it, so the head doubled back into its own body.
+TEST(SnakeLogic, FastDoubleTapCannotReverseOntoOwnBodyHorizontally) {
+  SnakeState g;
+  snakeReset(g, 0xDEAD);
+  snakeToggle(g);
+  layBody(g, 20, 6, Dir::Right, 6);   // body trails west of the head
+
+  snakeFrame(g, Dir::Up);             // both taps land inside one window
+  snakeFrame(g, Dir::Left);
+
+  EXPECT_NE(g.state, State::Dead);    // a 180 would have hit seg[1]
+  EXPECT_EQ((uint8_t)g.dir, (uint8_t)Dir::Up);
+  EXPECT_EQ(g.segx[0], 20);
+  EXPECT_EQ(g.segy[0], 5);            // went up, not back west into the body
+}
+
+// Same trap on the vertical axis: heading south, tap Right then Up fast.
+TEST(SnakeLogic, FastDoubleTapCannotReverseOntoOwnBodyVertically) {
+  SnakeState g;
+  snakeReset(g, 0xDEAD);
+  snakeToggle(g);
+  layBody(g, 6, 11, Dir::Down, 6);    // body trails north of the head
+
+  snakeFrame(g, Dir::Right);
+  snakeFrame(g, Dir::Up);
+
+  EXPECT_NE(g.state, State::Dead);
+  EXPECT_EQ((uint8_t)g.dir, (uint8_t)Dir::Right);
+  EXPECT_EQ(g.segy[0], 11);
+  EXPECT_EQ(g.segx[0], 7);            // went east, not back up into the body
+}
+
+// A tapping that reverses the committed direction is dropped outright, so a
+// stray flick cannot cancel the turn the player actually asked for: heading
+// east, tapping Left then Up must still turn north.
+TEST(SnakeLogic, ReversingTapIsDroppedAndValidTapSurvives) {
+  SnakeState g;
+  snakeReset(g, 0xDEAD);
+  snakeToggle(g);
+  playFrames(g, Dir::Right, g.framesPerMove + 1);
+  const uint8_t hx = g.segx[0], hy = g.segy[0];
+
+  snakeFrame(g, Dir::Left);           // illegal: head is travelling east
+  snakeFrame(g, Dir::Up);             // legal, and must still be honoured
+  playFrames(g, Dir::None, g.framesPerMove + 1);
+
+  EXPECT_EQ((uint8_t)g.dir, (uint8_t)Dir::Up);
+  EXPECT_EQ(g.segx[0], hx);
+  EXPECT_EQ(g.segy[0], (uint8_t)(hy - 1));
+}
+
+// Two legal taps in one window: the later one wins (last press is the intent),
+// and both were validated against the direction actually being travelled, so
+// the commit can never be a reversal.
+TEST(SnakeLogic, LastLegalTapInAWindowWins) {
+  SnakeState g;
+  snakeReset(g, 0xDEAD);
+  snakeToggle(g);
+  playFrames(g, Dir::Right, g.framesPerMove + 1);
+  const uint8_t hx = g.segx[0], hy = g.segy[0];
+
+  snakeFrame(g, Dir::Up);             // queued...
+  snakeFrame(g, Dir::Right);          // ...then superseded before the move
+  playFrames(g, Dir::None, g.framesPerMove + 1);
+
+  EXPECT_EQ((uint8_t)g.dir, (uint8_t)Dir::Right);
+  EXPECT_EQ(g.segx[0], (uint8_t)(hx + 1));
+  EXPECT_EQ(g.segy[0], hy);
+}
+
+// Pausing mid-turn must not resurrect the queued direction on resume.
+TEST(SnakeLogic, PauseDropsQueuedTurn) {
+  SnakeState g;
+  snakeReset(g, 0xDEAD);
+  snakeToggle(g);
+  playFrames(g, Dir::Right, g.framesPerMove + 1);
+  snakeFrame(g, Dir::Up);             // queued, not yet committed
+  snakeToggle(g);                     // pause
+  EXPECT_EQ(g.want, Dir::None);
+  snakeToggle(g);                     // resume
+  playFrames(g, Dir::None, g.framesPerMove + 1);
+  EXPECT_EQ((uint8_t)g.dir, (uint8_t)Dir::Right);
 }
 
 TEST(SnakeLogic, EatsFoodGrowsAndScores) {

@@ -70,17 +70,27 @@ void snakeReset(SnakeState& g, uint32_t seed) {
 void snakeFrame(SnakeState& g, Dir want) {
   if (g.state != State::Running) return;
 
+  // Steering is queued, never applied on the spot, and every candidate is
+  // validated against `g.dir` -- the direction the head is actually travelling in.
+  // Comparing against the previously *queued* direction instead is what let a
+  // 180-degree flip through: heading Right, pressing Up then Left within one
+  // framesPerMove window validated Left against the queued Up (fine), then
+  // committed it, so the head stepped back into its own neck on the same row.
+  // Two rapid presses that both survive as a turn now have to be two real turns:
+  // the second is dropped if it reverses the first, and the first wins.
   if (want != Dir::None) {
     bool reverse =
         (want == Dir::Left  && g.dir == Dir::Right) ||
         (want == Dir::Right && g.dir == Dir::Left)  ||
         (want == Dir::Up    && g.dir == Dir::Down)  ||
         (want == Dir::Down  && g.dir == Dir::Up);
-    if (!reverse) g.dir = want;
+    if (!reverse) g.want = want;
   }
 
   if (++g.frameCounter < g.framesPerMove) return;
   g.frameCounter = 0;
+  if (g.want != Dir::None) g.dir = g.want;   // commit the queued turn
+  g.want = Dir::None;
   if (g.dir == Dir::None) return;
 
   int16_t dx = 0, dy = 0;
@@ -131,6 +141,7 @@ void snakeToggle(SnakeState& g) {
     case State::Paused:  g.state = State::Running; break;
     case State::Dead:    snakeReset(g, g.seed);     break;
   }
+  g.want = Dir::None;   // a pause drops any half-committed turn
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +379,10 @@ void snakeRender(const SnakeState& g, uint8_t* buf) {
 // seg[i]. Packed LSB-first into the byte stream starting at bit 0 of byte 19.
 // Fixed 19-byte header + 2 bits per segment means even a full board (403 cells)
 // fits SNAKE_SAVE_CAP.
+//
+// The queued steering direction (`want`) is deliberately NOT stored: it only ever
+// survives a single move tick, so resuming continues straight along `dir` until
+// the player steers again.
 static const uint16_t SAVE_HEADER = 19;
 
 uint16_t snakeExport(const SnakeState& g, uint8_t* out, uint16_t cap) {

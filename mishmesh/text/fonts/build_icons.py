@@ -56,6 +56,7 @@ ICONS = [
     ("Tomato",     "tomato",      0xE028),   # pomodoro tab + focus-phase mark (vendored: hand-drawn)
     ("Lock",       "lock",        0xE029),   # screen lock, shown on the sleep face
     ("Snake",      "snake",       0xE02A),   # snake game applet (vendored: hand-drawn)
+    ("Tetris",     "tetris",      0xE02B),   # tetris game applet (vendored: hand-drawn)
 ]
 
 # Iconify-sourced compound paths whose inner subpaths are holes (even-odd),
